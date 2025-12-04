@@ -12,6 +12,7 @@ from aws_cdk import (
     aws_cloudwatch as cloudwatch_,
     aws_logs as logs_,
     Duration,
+    CfnOutput,
 )
 from constructs import Construct
 
@@ -137,6 +138,7 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             self,
             "Endpoint",
             handler=api_hanlder,
+            api_key_source_type=apigw_.ApiKeySourceType.HEADER,
             deploy_options=apigw_.StageOptions(
                 throttling_rate_limit=100,  # requests per second
                 throttling_burst_limit=200,  # burst capacity
@@ -154,6 +156,33 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
                     user=True,
                 ),
             ),
+        )
+
+        # Create usage plan with per-client throttling
+        usage_plan = api.add_usage_plan(
+            "StandardUsagePlan",
+            name="StandardUsagePlan",
+            throttle=apigw_.ThrottleSettings(
+                rate_limit=10,
+                burst_limit=20
+            ),
+            quota=apigw_.QuotaSettings(
+                limit=10000,
+                period=apigw_.Period.DAY
+            )
+        )
+
+        # Create API key and associate with usage plan
+        api_key = api.add_api_key("DemoApiKey", api_key_name="DemoApiKey")
+        usage_plan.add_api_key(api_key)
+        usage_plan.add_api_stage(stage=api.deployment_stage)
+
+        # Output API key ID for reference
+        CfnOutput(
+            self,
+            "ApiKeyId",
+            value=api_key.key_id,
+            description="API Key ID - retrieve value from AWS Console"
         )
 
         # CloudWatch Alarms for monitoring
