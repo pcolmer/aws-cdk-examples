@@ -73,15 +73,29 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             )
         )
 
-        # Create DynamoDb Table with logging and recovery
+        # Create DynamoDb Table with provisioned capacity aligned with API throttle limits
+        # Write capacity set to 100 WCU to match expected API throttle rate
         demo_table = dynamodb_.Table(
             self,
             TABLE_NAME,
             partition_key=dynamodb_.Attribute(
                 name="id", type=dynamodb_.AttributeType.STRING
             ),
+            billing_mode=dynamodb_.BillingMode.PROVISIONED,
+            read_capacity=5,
+            write_capacity=100,
             point_in_time_recovery=True,
             stream=dynamodb_.StreamViewType.NEW_AND_OLD_IMAGES,
+        )
+
+        # Enable auto-scaling for write capacity
+        write_scaling = demo_table.auto_scale_write_capacity(
+            min_capacity=10,
+            max_capacity=200
+        )
+
+        write_scaling.scale_on_utilization(
+            target_utilization_percent=70
         )
 
         # Create the Lambda function to receive the request
@@ -164,4 +178,14 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             threshold=10,
             evaluation_periods=2,
             alarm_description="Alert on DynamoDB throttling events",
+        )
+
+        # DynamoDB write throttle alarm
+        cloudwatch_.Alarm(
+            self,
+            "DynamoDBWriteThrottleAlarm",
+            metric=demo_table.metric("WriteThrottleEvents"),
+            threshold=5,
+            evaluation_periods=2,
+            alarm_description="Alert on DynamoDB write throttling events",
         )
