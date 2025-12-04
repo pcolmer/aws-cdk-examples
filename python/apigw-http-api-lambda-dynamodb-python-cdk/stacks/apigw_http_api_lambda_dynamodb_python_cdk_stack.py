@@ -99,6 +99,9 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
         )
 
         # Create the Lambda function to receive the request
+        # Reserved concurrency calculation based on REL05-BP02:
+        # Assuming API throttle of 100 req/s and avg execution time of 500ms:
+        # Reserved Concurrency = (100 req/s × 0.5s) + 20% buffer = 60
         api_hanlder = lambda_.Function(
             self,
             "ApiHandler",
@@ -114,6 +117,7 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             timeout=Duration.minutes(5),
             tracing=lambda_.Tracing.ACTIVE,
             log_retention=logs_.RetentionDays.ONE_YEAR,
+            reserved_concurrent_executions=60,
         )
 
         # grant permission to lambda to write to demo table
@@ -158,6 +162,16 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             threshold=1,
             evaluation_periods=1,
             alarm_description="Alert when Lambda function errors occur",
+        )
+
+        # Lambda concurrency alarm
+        cloudwatch_.Alarm(
+            self,
+            "LambdaConcurrencyAlarm",
+            metric=api_hanlder.metric_concurrent_executions(),
+            threshold=48,  # 80% of reserved concurrency (60)
+            evaluation_periods=2,
+            alarm_description="Alert when Lambda approaches concurrency limit",
         )
 
         # API Gateway 5xx error alarm
