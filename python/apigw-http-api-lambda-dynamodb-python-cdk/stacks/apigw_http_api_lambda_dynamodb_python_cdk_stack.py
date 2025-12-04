@@ -131,12 +131,15 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             retention=logs_.RetentionDays.ONE_YEAR,
         )
 
-        # Create API Gateway with X-Ray tracing and access logging enabled
+        # Create API Gateway with X-Ray tracing, access logging, and throttling enabled
+        # Throttle limits based on REL05-BP02 best practice
         api = apigw_.LambdaRestApi(
             self,
             "Endpoint",
             handler=api_hanlder,
             deploy_options=apigw_.StageOptions(
+                throttling_rate_limit=100,  # requests per second
+                throttling_burst_limit=200,  # burst capacity
                 tracing_enabled=True,
                 access_log_destination=apigw_.LogGroupLogDestination(api_log_group),
                 access_log_format=apigw_.AccessLogFormat.json_with_standard_fields(
@@ -182,6 +185,16 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             threshold=5,
             evaluation_periods=2,
             alarm_description="Alert on API Gateway server errors",
+        )
+
+        # API Gateway 4xx error alarm for throttling (429 responses)
+        cloudwatch_.Alarm(
+            self,
+            "ApiGatewayThrottleAlarm",
+            metric=api.metric_client_error(),
+            threshold=50,
+            evaluation_periods=2,
+            alarm_description="Alert on API Gateway throttling events (429 responses)",
         )
 
         # DynamoDB throttle alarm
