@@ -11,6 +11,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_cloudwatch as cloudwatch_,
     aws_logs as logs_,
+    aws_wafv2 as wafv2_,
     Duration,
 )
 from constructs import Construct
@@ -156,6 +157,45 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             ),
         )
 
+        # Create WAF Web ACL with rate-based rule for IP-level protection
+        web_acl = wafv2_.CfnWebACL(
+            self,
+            "ApiWebAcl",
+            scope="REGIONAL",
+            default_action=wafv2_.CfnWebACL.DefaultActionProperty(allow={}),
+            visibility_config=wafv2_.CfnWebACL.VisibilityConfigProperty(
+                cloud_watch_metrics_enabled=True,
+                metric_name="ApiWebAcl",
+                sampled_requests_enabled=True
+            ),
+            rules=[
+                wafv2_.CfnWebACL.RuleProperty(
+                    name="RateLimitRule",
+                    priority=1,
+                    statement=wafv2_.CfnWebACL.StatementProperty(
+                        rate_based_statement=wafv2_.CfnWebACL.RateBasedStatementProperty(
+                            limit=2000,
+                            aggregate_key_type="IP"
+                        )
+                    ),
+                    action=wafv2_.CfnWebACL.RuleActionProperty(block={}),
+                    visibility_config=wafv2_.CfnWebACL.VisibilityConfigProperty(
+                        cloud_watch_metrics_enabled=True,
+                        metric_name="RateLimitRule",
+                        sampled_requests_enabled=True
+                    )
+                )
+            ]
+        )
+
+        # Associate WAF Web ACL with API Gateway stage
+        wafv2_.CfnWebACLAssociation(
+            self,
+            "WebAclAssociation",
+            resource_arn=f"arn:aws:apigateway:{self.region}::/restapis/{api.rest_api_id}/stages/{api.deployment_stage.stage_name}",
+            web_acl_arn=web_acl.attr_arn
+        )
+
         # CloudWatch Alarms for monitoring
         # Lambda error alarm
         cloudwatch_.Alarm(
@@ -195,6 +235,24 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             threshold=50,
             evaluation_periods=2,
             alarm_description="Alert on API Gateway throttling events (429 responses)",
+        )
+
+        # WAF blocked requests alarm
+        cloudwatch_.Alarm(
+            self,
+            "WafBlockedRequestsAlarm",
+            metric=cloudwatch_.Metric(
+                namespace="AWS/WAFV2",
+                metric_name="BlockedRequests",
+                dimensions_map={
+                    "WebACL": "ApiWebAcl",
+                    "Region": self.region,
+                    "Rule": "RateLimitRule"
+                }
+            ),
+            threshold=100,
+            evaluation_periods=1,
+            alarm_description="Alert when WAF blocks excessive requests",
         )
 
         # DynamoDB throttle alarm
